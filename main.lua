@@ -44,7 +44,8 @@ local game_paths = {
     diggable = services.workspace:FindFirstChild("World"):FindFirstChild("Zones"):FindFirstChild("_Dig"),
     totems = services.workspace:FindFirstChild("Active"):FindFirstChild("Totems"),
     bosses = services.workspace:FindFirstChild("Spawns"):FindFirstChild("BossSpawns"),
-    abundance = services.workspace:FindFirstChild("World"):FindFirstChild("Map"):FindFirstChild("_Abundances")
+    abundance = services.workspace:FindFirstChild("World"):FindFirstChild("Map"):FindFirstChild("_Abundances"),
+    places = services.workspace:FindFirstChild("Spawns"):FindFirstChild("TeleportSpawns")
 }
 
 for name, path in pairs(game_paths) do
@@ -54,7 +55,9 @@ for name, path in pairs(game_paths) do
 end
 
 local cache = {
-    abundance_names = {}
+    abundance_names = {},
+    places_data = { ["None"] = nil },
+    NPC_data = { ["None"] = nil }
 }
 
 local config = {
@@ -87,10 +90,7 @@ local config = {
     
     inventory = {
         auto_sell = false,
-        sell_delay = 5,
-        auto_favorite = false,
-        favorite_items = {},
-        favorite_action = "Favorite" -- "Favorite" or "Unfavorite"
+        sell_delay = 5
     }
 }
 
@@ -143,7 +143,6 @@ function utils.is_staff(player_obj)
         if config.staff.method == "Kick" then
             player:Kick(role.." detected! Username: "..player_obj.DisplayName)
         elseif config.staff.method == "Notify" then
-            -- Notifikasi dihapus sesuai permintaan pengguna
             print("Staff Detected! "..role.." detected! Username: "..player_obj.DisplayName)
         end
         return true
@@ -156,6 +155,50 @@ function utils.teleport_to(position)
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
     if not character or not hrp then return end
     hrp.CFrame = CFrame.new(position)
+end
+
+function teleport_to_places(name_places)
+    if name_places == "None" then return end
+    local part_places = cache.places_data[name_places]
+    if part_places then
+        utils.teleport_to(part_places.Position + Vector3.new(0, 5, 0))
+    end
+end
+
+function teleport_to_npc(npc_name)
+    if npc_name == "None" then return end
+    local npc = cache.NPC_data[npc_name]
+    if npc and npc:IsA("Model") then
+        utils.teleport_to(npc:GetPivot().Position + Vector3.new(0, 5, 0))
+    end
+end
+
+function teleport_to_merchant()
+    local merchant = game_paths.npcs:FindFirstChild("Merchant Cart")
+    if merchant then
+        utils.teleport_to(merchant:GetPivot().Position)
+    end
+end
+
+function teleport_to_meteor()
+    local meteor = services.workspace:FindFirstChild("Active"):FindFirstChild("ActiveMeteor")
+    if meteor then
+        utils.teleport_to(meteor:GetPivot().Position)
+    end
+end
+
+function teleport_to_enchantment_altar()
+    local altar = game_paths.world:FindFirstChild("Interactive"):FindFirstChild("Enchanting"):FindFirstChild("EnchantmentAltar"):FindFirstChild("EnchantPart")
+    if altar then
+        utils.teleport_to(altar:GetPivot().Position)
+    end
+end
+
+function teleport_to_active_totem()
+    local totem = utils.closest_totem()
+    if totem then
+        utils.teleport_to(totem:GetPivot().Position)
+    end
 end
 
 function utils.auto_holes()
@@ -191,7 +234,6 @@ end)
 local dig_disabled_time = nil
 
 -- Event untuk memastikan UI Backpack tetap muncul
--- Ganti bagian events.ensure_backpack_ui dengan ini:
 events.ensure_backpack_ui = services.run.Heartbeat:Connect(function()
     if player.Character and player.Character:FindFirstChildOfClass("Tool") then
         -- Jika pemain sedang memegang tool (seperti shovel), pastikan UI Backpack tetap muncul
@@ -384,9 +426,6 @@ function sell_all_items()
         workspace.World.NPCs.Rocky
     )
     
-    -- Notifikasi dihapus sesuai permintaan pengguna
-    -- print("All items have been sold!")
-    
     -- Pastikan UI Backpack tetap muncul setelah menjual
     task.spawn(function()
         task.wait(0.5) -- Tunggu sebentar setelah menjual
@@ -404,14 +443,10 @@ function sell_held_item()
     
     local tool = utils.get_tool()
     if not tool then
-        -- Notifikasi dihapus sesuai permintaan pengguna
-        -- print("No Tool Found!")
         return
     end
     
     if not tool:GetAttribute("InventoryLink") then
-        -- Notifikasi dihapus sesuai permintaan pengguna
-        -- print("Cant Sell This Item!")
         return
     end
     
@@ -450,9 +485,6 @@ function teleport_to_meteor()
     local meteor = workspace:FindFirstChild("Active"):FindFirstChild("ActiveMeteor")
     if meteor then
         utils.teleport_to(meteor:GetPivot().Position)
-    else
-        -- Notifikasi dihapus sesuai permintaan pengguna
-        -- print("No Meteor Found!")
     end
 end
 
@@ -467,9 +499,6 @@ function teleport_to_active_totem()
     local totem = utils.closest_totem()
     if totem then
         utils.teleport_to(totem:GetPivot().Position)
-    else
-        -- Notifikasi dihapus sesuai permintaan pengguna
-        -- print("No Active Totem Found!")
     end
 end
 
@@ -514,13 +543,358 @@ function start_auto_dig()
     end)
 end
 
+-- Fungsi untuk menghitung nilai item dari calculatevalue.lua
+local calculateValueModule = {}
+
+-- Fungsi untuk mengkonversi Color3 ke Hex
+function calculateValueModule.Color3ToHex(color)
+    return string.format("#%02x%02x%02x", 
+        math.floor(color.R * 255),
+        math.floor(color.G * 255),
+        math.floor(color.B * 255)
+    )
+end
+
+-- Fungsi untuk mengkonversi Hex ke Color3
+function calculateValueModule.HexToColor3(hex)
+    hex = hex:gsub("#", "")
+    local r = tonumber(hex:sub(1,2), 16) / 255
+    local g = tonumber(hex:sub(3,4), 16) / 255
+    local b = tonumber(hex:sub(5,6), 16) / 255
+    return Color3.fromRGB(r * 255, g * 255, b * 255)
+end
+
+-- Fungsi untuk mendapatkan nama size berdasarkan warna hex DAN text
+function calculateValueModule.getSizeFromColorAndText(hexColor, text, SizesDictionary)
+    if not SizesDictionary or type(SizesDictionary) ~= "table" then
+        return nil, nil
+    end
+    
+    local matchingColors = {}
+    
+    -- Pertama, kumpulkan semua size yang memiliki warna yang sama
+    for sizeName, sizeData in pairs(SizesDictionary) do
+        if sizeData and sizeData.Color then
+            local sizeHex = calculateValueModule.Color3ToHex(sizeData.Color)
+            if sizeHex:lower() == hexColor:lower() then
+                table.insert(matchingColors, {name = sizeName, data = sizeData})
+            end
+        end
+    end
+    
+    -- Jika hanya ada satu match, return itu
+    if #matchingColors == 1 then
+        return matchingColors[1].name, matchingColors[1].data
+    end
+    
+    -- Jika ada beberapa match dengan warna sama, cek berdasarkan text
+    if #matchingColors > 1 and text then
+        for _, match in pairs(matchingColors) do
+            if text:lower():find(match.name:lower()) then
+                return match.name, match.data
+            end
+        end
+        
+        -- Jika tidak ada yang cocok dengan text, return yang pertama sebagai fallback
+        return matchingColors[1].name, matchingColors[1].data
+    end
+    
+    return nil, nil
+end
+
+-- Fungsi untuk mendapatkan nama modifier berdasarkan warna hex DAN text
+function calculateValueModule.getModifierFromColorAndText(hexColor, text, ModifiersDictionary)
+    if not ModifiersDictionary or type(ModifiersDictionary) ~= "table" then
+        return nil, nil
+    end
+    
+    local matchingColors = {}
+    
+    -- Pertama, kumpulkan semua modifier yang memiliki warna yang sama
+    for modifierName, modifierData in pairs(ModifiersDictionary) do
+        if modifierData and modifierData.Color then
+            local modifierHex = calculateValueModule.Color3ToHex(modifierData.Color)
+            if modifierHex:lower() == hexColor:lower() then
+                table.insert(matchingColors, {name = modifierName, data = modifierData})
+            end
+        end
+    end
+    
+    -- Jika hanya ada satu match, return itu
+    if #matchingColors == 1 then
+        return matchingColors[1].name, matchingColors[1].data
+    end
+    
+    -- Jika ada beberapa match dengan warna sama, cek berdasarkan text
+    if #matchingColors > 1 and text then
+        for _, match in pairs(matchingColors) do
+            if text:lower():find(match.name:lower()) then
+                return match.name, match.data
+            end
+        end
+        
+        -- Jika tidak ada yang cocok dengan text, return yang pertama sebagai fallback
+        return matchingColors[1].name, matchingColors[1].data
+    end
+    
+    return nil, nil
+end
+
+-- Fungsi untuk mengparse ItemName dan mendapatkan informasi size/modifier/shiny
+function calculateValueModule.parseItemName(itemNameText, SizesDictionary, ModifiersDictionary)
+    local result = {
+        baseName = "",
+        size = nil,
+        sizeData = nil,
+        modifier = nil,
+        modifierData = nil,
+        isShiny = false,
+        fullText = itemNameText
+    }
+    
+    -- Cek apakah item shiny (biasanya ada kata "Shiny" atau simbol ✨)
+    if itemNameText:lower():find("shiny") or itemNameText:find("✨") or itemNameText:find("⭐") then
+        result.isShiny = true
+    end
+    
+    -- Extract warna dan text dari font color tag
+    local colorPattern = '<font color="(#%x%x%x%x%x%x)">([^<]*)</font>'
+    local colors = {}
+    local texts = {}
+    
+    -- Ambil semua warna dan teks yang ada di dalam tag font
+    for color, text in itemNameText:gmatch(colorPattern) do
+        table.insert(colors, color)
+        table.insert(texts, text)
+    end
+    
+    -- Bersihkan teks dari tag HTML untuk mendapatkan base name
+    local cleanText = itemNameText:gsub('<[^>]+>', '')
+    -- Hapus kata "Shiny" dari base name jika ada
+    cleanText = cleanText:gsub("Shiny ", ""):gsub(" Shiny", ""):gsub("✨", ""):gsub("⭐", ""):gsub("%s+", " "):gsub("^%s*", ""):gsub("%s*$", "")
+    result.baseName = cleanText
+    
+    -- Cek setiap warna dan text untuk size dan modifier
+    for i, color in ipairs(colors) do
+        local text = texts[i] or ""
+        
+        -- Cek untuk size dengan warna DAN text
+        local sizeName, sizeData = calculateValueModule.getSizeFromColorAndText(color, text, SizesDictionary)
+        if sizeName then
+            result.size = sizeName
+            result.sizeData = sizeData
+        end
+        
+        -- Cek untuk modifier dengan warna DAN text
+        local modifierName, modifierData = calculateValueModule.getModifierFromColorAndText(color, text, ModifiersDictionary)
+        if modifierName then
+            result.modifier = modifierName
+            result.modifierData = modifierData
+        end
+    end
+    
+    return result
+end
+
+-- Fungsi untuk menghitung harga item dengan multiplier termasuk shiny
+function calculateValueModule.calculateItemPrice(basePrice, sizeData, modifierData, isShiny)
+    local finalPrice = basePrice
+    
+    -- Apply size multiplier
+    if sizeData and sizeData.PriceMultiplier then
+        finalPrice = finalPrice * sizeData.PriceMultiplier
+    end
+    
+    -- Apply modifier multiplier
+    if modifierData and modifierData.PriceMultiplier then
+        finalPrice = finalPrice * modifierData.PriceMultiplier
+    end
+    
+    -- Apply shiny multiplier (x1.8)
+    if isShiny then
+        finalPrice = finalPrice * 1.8
+    end
+    
+    return math.floor(finalPrice)
+end
+
+-- Fungsi utama untuk menghitung semua item
+function calculateValueModule.countAllItems()
+    -- Validasi backpack path
+    local backpackGui = player.PlayerGui:FindFirstChild("Backpack")
+    if not backpackGui then
+        return {error = "Backpack GUI not found!"}
+    end
+    
+    local backpackScroll = backpackGui.Backpack.Inventory.Container.Scroll
+    if not backpackScroll then
+        return {error = "Backpack scroll container not found!"}
+    end
+    
+    -- Load dictionaries
+    local function loadDictionary(path)
+        local success, result = pcall(function()
+            local module = services.replicated_storage:WaitForChild("Dictionary", 10)
+            if path == "Items" then
+                return require(module:WaitForChild("Items", 5))
+            elseif path == "Sizes" then
+                return require(module:WaitForChild("Sizes", 5))
+            elseif path == "Modifiers" then
+                return require(module:WaitForChild("Modifiers", 5))
+            end
+        end)
+        return success and result or nil
+    end
+    
+    local ItemsDictionary = loadDictionary("Items")
+    local SizesDictionary = loadDictionary("Sizes") 
+    local ModifiersDictionary = loadDictionary("Modifiers")
+    
+    if not ItemsDictionary then
+        return {error = "Failed to load Items Dictionary!"}
+    end
+    
+    if not SizesDictionary then
+        SizesDictionary = {}
+    end
+    
+    if not ModifiersDictionary then
+        ModifiersDictionary = {}
+    end
+    
+    local itemCounts = {}
+    local totalValue = 0
+    local totalItems = 0
+    
+    for _, itemFrame in pairs(backpackScroll:GetChildren()) do
+        if itemFrame:IsA("GuiObject") and itemFrame:FindFirstChild("Main") and itemFrame.Main:FindFirstChild("ItemName") then
+            local itemNameLabel = itemFrame.Main.ItemName
+            local itemNameText = itemNameLabel.Text
+            
+            -- Parse item name untuk mendapatkan info
+            local itemInfo = calculateValueModule.parseItemName(itemNameText, SizesDictionary, ModifiersDictionary)
+            local baseName = itemInfo.baseName
+            
+            -- Cari item di dictionary
+            local itemData = nil
+            for itemKey, data in pairs(ItemsDictionary) do
+                if itemKey == baseName or (baseName:find(itemKey) or itemKey:find(baseName)) then
+                    itemData = data
+                    baseName = itemKey
+                    break
+                end
+            end
+            
+            if itemData then
+                -- Hitung harga dengan multiplier termasuk shiny
+                local basePrice = itemData.Price or 0
+                local finalPrice = calculateValueModule.calculateItemPrice(basePrice, itemInfo.sizeData, itemInfo.modifierData, itemInfo.isShiny)
+                
+                -- Buat key unik untuk item dengan size/modifier/shiny
+                local uniqueKey = baseName
+                if itemInfo.size then
+                    uniqueKey = uniqueKey .. " (" .. itemInfo.size .. ")"
+                end
+                if itemInfo.modifier then
+                    uniqueKey = uniqueKey .. " [" .. itemInfo.modifier .. "]"
+                end
+                if itemInfo.isShiny then
+                    uniqueKey = "✨ " .. uniqueKey .. " (Shiny)"
+                end
+                
+                -- Tambah ke counter
+                if not itemCounts[uniqueKey] then
+                    itemCounts[uniqueKey] = {
+                        count = 0,
+                        basePrice = basePrice,
+                        finalPrice = finalPrice,
+                        size = itemInfo.size,
+                        modifier = itemInfo.modifier,
+                        isShiny = itemInfo.isShiny,
+                        rarity = itemData.Rarity or "Unknown"
+                    }
+                end
+                
+                itemCounts[uniqueKey].count = itemCounts[uniqueKey].count + 1
+                totalValue = totalValue + finalPrice
+                totalItems = totalItems + 1
+            end
+        end
+    end
+    
+    -- Sort berdasarkan rarity dan nama
+    local sortedItems = {}
+    for itemName, data in pairs(itemCounts) do
+        table.insert(sortedItems, {name = itemName, data = data})
+    end
+    
+    table.sort(sortedItems, function(a, b)
+        if a.data.rarity == b.data.rarity then
+            return a.name < b.name
+        end
+        return a.data.rarity < b.data.rarity
+    end)
+    
+    return {
+        items = sortedItems,
+        totalItems = totalItems,
+        totalValue = totalValue
+    }
+end
+
+-- Variabel untuk menyimpan label hasil perhitungan
+local totalItemsLabel = nil
+local totalValueLabel = nil
+
+-- Fungsi untuk menampilkan hasil perhitungan nilai
+function show_calculate_value_result()
+    -- Buka backpack terlebih dahulu
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local openBackpack = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Bindable_BackpackClient_ToggleInventory")
+    openBackpack:Fire()
+    
+    -- Tunggu sampai backpack terbuka dan BackpackScroll muncul
+    local backpackGui = player.PlayerGui:WaitForChild("Backpack", 3)
+    if not backpackGui then
+        print("Error: Backpack GUI tidak ditemukan")
+        return
+    end
+    
+    -- Pastikan backpack terlihat
+    backpackGui.Enabled = true
+    
+    -- Tunggu sampai BackpackScroll muncul
+    local backpackScroll = backpackGui:WaitForChild("Backpack", 3):WaitForChild("Inventory", 3):WaitForChild("Container", 3):WaitForChild("Scroll", 3)
+    if not backpackScroll then
+        print("Error: BackpackScroll tidak ditemukan")
+        return
+    end
+    
+    -- Hitung nilai item
+    local result = calculateValueModule.countAllItems()
+    
+    if result.error then
+        print("Error: " .. result.error)
+        return
+    end
+    
+    -- Update label jika sudah ada
+    if totalItemsLabel and totalValueLabel then
+        totalItemsLabel:Set("Total Items: " .. result.totalItems)
+        totalValueLabel:Set("Total Value: " .. result.totalValue .. " coins")
+    end
+end
+
 local Luna = loadstring(game:HttpGet(
   "https://raw.githubusercontent.com/Nebula-Softworks/Luna-Interface-Suite/refs/heads/master/source.lua",
   true
 ))()
 local abundance_parts = {}
 local abundance_names = {}
+local places_names = {}
+local npc_names = {}
 
+-- Mengisi cache abundance
 if game_paths.abundance then
     for _, part in ipairs(game_paths.abundance:GetChildren()) do
         local attr = part:GetAttribute("Abundance")
@@ -534,7 +908,31 @@ if game_paths.abundance then
     end
 end
 
+-- Mengisi cache places
+if game_paths.places then
+    for _, part_places in ipairs(game_paths.places:GetChildren()) do
+        local name_places = part_places.Name
+        if name_places and not cache.places_data[name_places] then
+            table.insert(places_names, name_places)
+            cache.places_data[name_places] = part_places
+        end
+    end
+end
+
+-- Mengisi cache NPC
+if game_paths.npcs then
+    for _, npc in ipairs(game_paths.npcs:GetChildren()) do
+        local name = npc.Name
+        if name and not cache.NPC_data[name] then
+            table.insert(npc_names, name)
+            cache.NPC_data[name] = npc
+        end
+    end
+end
+
 table.sort(abundance_names)
+table.sort(places_names)
+table.sort(npc_names)
 
 local Window = Luna:CreateWindow{
   Name = "Private Script Dig",
@@ -599,7 +997,6 @@ farm:CreateSlider({
     CurrentValue = config.dig.auto_fix_delay, 
     Callback = function(v) 
         config.dig.auto_fix_delay = v 
-        -- print("Auto Fix Shovel Delay diatur ke " .. v .. " detik")
     end
 })
 
@@ -652,207 +1049,32 @@ inv:CreateButton({Name="Sell Held Item", Callback=sell_held_item})
 inv:CreateSection("Journal Settings")
 inv:CreateButton({Name="Claim Unclaimed Discovered Items", Callback=claim_discovered_items})
 
--- Favoriting Section
-inv:CreateSection("Favorite Items")
+-- Calculate Value Section
+inv:CreateSection("Calculate Value")
 
--- Setup auto favorite config
-config.inventory.auto_favorite = false
-config.inventory.favorite_items = {}
-config.inventory.favorite_action = "Favorite"
-config.inventory.favorited_ids = {} -- Track already favorited items
+-- Buat label untuk menampilkan hasil perhitungan
+inv:CreateParagraph({Text = "lorem ipsum dolor sit amet consectetur adipisicing elit. "})
 
--- Get all item names
-local function get_all_item_names()
-    local items = {}
-    local itemsDictionary = require(services.replicated_storage:WaitForChild("Dictionary"):WaitForChild("Items"))
-    
-    for itemName, _ in pairs(itemsDictionary) do
-        table.insert(items, itemName)
-    end
-    
-    table.sort(items)
-    return items
-end
 
--- Function to toggle favorite status
-function toggle_favorite(item, should_favorite)
-    if not item or not item:GetAttribute("InventoryLink") then return end
-    
-    local Event = services.replicated_storage:WaitForChild("Remotes"):WaitForChild("Backpack_Favourite")
-    if not Event then return end
-    
-    -- Parse inventoryLink format: ItemName_UUID_OwnerID
-    local inventoryLink = item:GetAttribute("InventoryLink")
-    local parts = string.split(inventoryLink, "_")
-    local itemID = parts[2] or inventoryLink
-    
-    -- Check if item is already in desired state
-    local isAlreadyFavorited = config.inventory.favorited_ids[itemID]
-    if (should_favorite and isAlreadyFavorited) or (not should_favorite and not isAlreadyFavorited) then
-        return -- Item already in desired state
-    end
-    
-    -- Create arguments structure
-    local args = {
-        ItemName = item.Name,
-        ID = itemID,
-        OwnerID = tonumber(parts[3]) or player.UserId,
-        Attributes = {
-            Favourited = should_favorite
-        }
-    }
-    
-    Event:FireServer(args)
-    
-    -- Update tracked state
-    if should_favorite then
-        config.inventory.favorited_ids[itemID] = true
-    else
-        config.inventory.favorited_ids[itemID] = nil
-    end
-end
-
--- Function to check if an item is favorited
-function is_item_favorited(item)
-    if not item or not item:GetAttribute("InventoryLink") then return false end
-    
-    local inventoryLink = item:GetAttribute("InventoryLink")
-    local parts = string.split(inventoryLink, "_")
-    local itemID = parts[2] or inventoryLink
-    
-    return config.inventory.favorited_ids[itemID] == true
-end
-
--- Function to auto favorite/unfavorite based on list
-function start_auto_favorite()
-    if not config.inventory.auto_favorite then return end
-    
-    task.spawn(function()
-        while config.inventory.auto_favorite do
-            for _, item in pairs(backpack:GetChildren()) do
-                if table.find(config.inventory.favorite_items, item.Name) then
-                    local should_favorite = config.inventory.favorite_action == "Favorite"
-                    
-                    -- Only toggle if item isn't already in desired state
-                    local is_favorited = is_item_favorited(item)
-                    if (should_favorite and not is_favorited) or (not should_favorite and is_favorited) then
-                        toggle_favorite(item, should_favorite)
-                        task.wait(0.2) -- Delay to avoid rate limiting
-                    end
-                end
-            end
-            task.wait(1) -- Check every second
-        end
-    end)
-end
-
--- Function to favorite/unfavorite a specific item
-function favorite_specific_item(item_name, should_favorite)
-    for _, item in pairs(backpack:GetChildren()) do
-        if item.Name == item_name then
-            -- Check if item is already in desired state
-            local is_favorited = is_item_favorited(item)
-            if (should_favorite and is_favorited) or (not should_favorite and not is_favorited) then
-                -- Notifikasi dihapus sesuai permintaan pengguna
-                -- print("Already " .. (should_favorite and "Favorited" or "Unfavorited") .. ": " .. item_name)
-                return true
-            end
-            
-            toggle_favorite(item, should_favorite)
-            -- Notifikasi dihapus sesuai permintaan pengguna
-            -- print((should_favorite and "Favorited" or "Unfavorited") .. ": " .. item_name)
-            return true
-        end
-    end
-    
-    -- Notifikasi dihapus sesuai permintaan pengguna
-    -- print("Item Not Found: Could not find " .. item_name .. " in backpack")
-    return false
-end
-
--- Function to scan current backpack and update favorited status
-function scan_favorited_items()
-    for _, item in pairs(backpack:GetChildren()) do
-        if item:GetAttribute("InventoryLink") then
-            local inventoryLink = item:GetAttribute("InventoryLink")
-            local parts = string.split(inventoryLink, "_")
-            local itemID = parts[2] or inventoryLink
-            
-            -- Check if item has a Favourited attribute
-            local attributes = item:GetAttributes()
-            if attributes and attributes.Favourited == true then
-                config.inventory.favorited_ids[itemID] = true
-            end
-        end
-    end
-end
-
--- Scan for favorited items when script starts
-scan_favorited_items()
-
--- Auto Favorite Toggle
-inv:CreateToggle({
-    Name = "Auto Favorite Items", 
-    CurrentValue = config.inventory.auto_favorite, 
-    Callback = function(v) 
-        config.inventory.auto_favorite = v 
-        if v then 
-            start_auto_favorite() 
-        end 
-    end
+-- Buat label untuk total item
+totalItemsLabel = inv:CreateLabel({
+    Text = "Total Item: 0",
+    Style = 1 -- Style 1 adalah label biasa
 })
 
--- Action selection (Favorite/Unfavorite)
-inv:CreateDropdown({
-    Name = "Favorite Action",
-    Options = {"Favorite", "Unfavorite"},
-    CurrentOption = {config.inventory.favorite_action},
-    MultipleOptions = false,
-    Callback = function(v) config.inventory.favorite_action = v end
+-- Buat label untuk total nilai
+totalValueLabel = inv:CreateLabel({
+    Text = "Total Nilai: 0 coins",
+    Style = 2 -- Style 2 adalah label informasi (hijau)
 })
 
-local all_item_names = get_all_item_names()
-
-local favorite_dropdown = inv:CreateDropdown({
-    Name = "Items to Auto Favorite",
-    Options = all_item_names,
-    CurrentOption = config.inventory.favorite_items,
-    MultipleOptions = true,
-    Callback = function(selected_items) 
-        config.inventory.favorite_items = selected_items
-    end
-})
--- Tidak menggunakan SetSearch karena tidak didukung
--- if favorite_dropdown and favorite_dropdown.SetSearch then
---     favorite_dropdown:SetSearch(true)
--- else
---     warn("Dropdown 'Items to Auto Favorite' tidak support SetSearch")
--- end
--- Buttons for favorite/unfavorite all items in backpack
+-- Tombol untuk menghitung nilai item
 inv:CreateButton({
-    Name = "Favorite All Items in Backpack", 
+    Name = "Calculate Item Value",
     Callback = function()
-        for _, item in pairs(backpack:GetChildren()) do
-            if not is_item_favorited(item) then
-                toggle_favorite(item, true)
-                task.wait(0.1)
-            end
-        end
+        show_calculate_value_result()
     end
 })
-
-inv:CreateButton({
-    Name = "Unfavorite All Items in Backpack", 
-    Callback = function()
-        for _, item in pairs(backpack:GetChildren()) do
-            if is_item_favorited(item) then
-                toggle_favorite(item, false)
-                task.wait(0.1)
-            end
-        end
-    end
-})
-
 
 local tp = Window:CreateTab({Name="Teleport", ShowTitle=true})
 tp:CreateSection("Misc Teleports")
@@ -860,6 +1082,33 @@ tp:CreateButton({Name="Teleport To Merchant", Callback=teleport_to_merchant})
 tp:CreateButton({Name="Teleport To Meteor", Callback=teleport_to_meteor})
 tp:CreateButton({Name="Teleport To EnchantmentAltar", Callback=teleport_to_enchantment_altar})
 tp:CreateButton({Name="Teleport To Active Totem", Callback=teleport_to_active_totem})
+
+tp:CreateSection("Places Teleports")
+-- Tambahkan None di awal array places_names
+table.insert(places_names, 1, "None")
+local places_dropdown = tp:CreateDropdown({
+    Name = "Teleport to Places",
+    Options = places_names,
+    CurrentOption = {"None"},
+    MultipleOptions = false,
+    Callback = function(v)
+        teleport_to_places(v)
+    end
+})
+
+tp:CreateSection("NPC Teleports")
+-- Tambahkan None di awal array npc_names
+table.insert(npc_names, 1, "None")
+local npc_dropdown = tp:CreateDropdown({
+    Name = "Teleport to NPC",
+    Options = npc_names,
+    CurrentOption = {"None"},
+    MultipleOptions = false,
+    Callback = function(v)
+        teleport_to_npc(v)
+    end
+})
+
 tp:CreateSection("Abundance Teleports")
 local abundance_dropdown = tp:CreateDropdown({
     Name = "Teleport to Abundance",
@@ -874,10 +1123,6 @@ local abundance_dropdown = tp:CreateDropdown({
         end
     end
 })
--- Tidak menggunakan SetSearch karena tidak didukung
--- if abundance_dropdown and abundance_dropdown.SetSearch then
---     abundance_dropdown:SetSearch(true)
--- end
 
 -- Fungsi untuk memastikan UI Backpack tetap muncul
 function ensure_backpack_ui_visible()
