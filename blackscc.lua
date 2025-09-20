@@ -13,7 +13,7 @@ gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.Parent = playerGui
 
--- Background hitam
+-- Background hitam + konten
 local frame = Instance.new("Frame")
 frame.Size = UDim2.new(1, 0, 1, 0)
 frame.Position = UDim2.new(0, 0, 0, 0)
@@ -29,7 +29,7 @@ container.Size = UDim2.new(0, 400, 0, 300)
 container.BackgroundTransparency = 1
 container.Parent = frame
 
--- Gambar profile (headshot)
+-- Gambar profile
 local profile = Instance.new("ImageLabel")
 profile.Size = UDim2.new(0, 100, 0, 100)
 profile.Position = UDim2.new(0.5, -50, 0, 0)
@@ -81,16 +81,17 @@ statsLabel.TextSize = 20
 statsLabel.TextColor3 = Color3.fromRGB(255, 255, 200)
 statsLabel.Parent = container
 
--- Tombol On/Off
+-- Tombol On/Off (SELALU DI ATAS)
 local button = Instance.new("TextButton")
 button.Size = UDim2.new(0, 120, 0, 40)
-button.Position = UDim2.new(0.5, -60, 1, -50)
+button.AnchorPoint = Vector2.new(0.5, 1)
+button.Position = UDim2.new(0.5, 0, 1, -20)
 button.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 button.TextColor3 = Color3.new(1, 1, 1)
 button.Font = Enum.Font.GothamBold
 button.TextSize = 18
 button.Text = "Turn OFF"
-button.Parent = container
+button.Parent = gui -- bukan parent frame biar ga ikut hilang
 
 -- Toggle fungsi
 local visible = true
@@ -100,18 +101,16 @@ button.MouseButton1Click:Connect(function()
 	button.Text = visible and "Turn OFF" or "Turn ON"
 end)
 
--- Update Level dan Money
+-- Update Level & Money
 task.spawn(function()
 	while task.wait(1) do
-		local success, err = pcall(function()
+		local success, _ = pcall(function()
 			local levelText = playerGui.XP.Frame.LevelCount.Text
 			local moneyText = playerGui.Events.Frame.CurrencyCounter.Counter.ContentText
-
 			levelLabel.Text = "Level: " .. tostring(levelText)
 			moneyLabel.Text = "Money: " .. tostring(moneyText)
 		end)
 		if not success then
-			-- biar gak error kalau UI belum ada
 			levelLabel.Text = "Level: ?"
 			moneyLabel.Text = "Money: ?"
 		end
@@ -132,8 +131,6 @@ RunService.RenderStepped:Connect(function()
 		lastTime = now
 	end
 end)
-
-
 -- Made by RIP#6666
 _G.Settings = {
     Players = {
